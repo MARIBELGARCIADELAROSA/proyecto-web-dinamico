@@ -1,6 +1,6 @@
 // --- 1. CONFIGURACIÓN INICIAL ---
 // Esta URL la obtendrás de Railway en la Fase 5
-const API_URL = 'URL_DE_TU_BACKEND_EN_RAILWAY'; 
+const API_URL = 'https://proyecto-web-dinamico.onrender.com';
 
 // Referencias a elementos del DOM
 const form = document.getElementById('producto-form');
