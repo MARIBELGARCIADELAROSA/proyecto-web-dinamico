@@ -1,26 +1,21 @@
 const express = require('express');
 const cors = require('cors');
-const { Pool } = require('pg');
+const mysql = require('mysql2/promise'); // Usamos el driver de MySQL
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// --- CONEXIÓN A LA BASE DE DATOS ---
-// Railway inyectará la URL de la base de datos automáticamente
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false // Requerido para conexiones remotas a Railway
-  }
-});
+// --- CONEXIÓN A LA BASE DE DATOS (MySQL / TiDB) ---
+// La URL completa con usuario, contraseña y configuración SSL viene de Render
+const pool = mysql.createPool(process.env.DATABASE_URL);
 
-// --- RUTAS CRUD (Create, Read, Update, Delete) ---
+// --- RUTAS CRUD ---
 
 // 2. READ (Leer todos los productos activos)
 app.get('/api/productos', async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM productos WHERE activo = true ORDER BY id DESC');
+    const [rows] = await pool.query('SELECT * FROM productos WHERE activo = true ORDER BY id DESC');
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -30,19 +25,23 @@ app.get('/api/productos', async (req, res) => {
 // 1. CREATE (Añadir un nuevo producto)
 app.post('/api/productos', async (req, res) => {
   try {
-    // Obtenemos todos los campos del body
     const { 
       nombre_producto, descripcion, precio_venta, precio_costo, 
       stock, sku, categoria 
     } = req.body;
 
-    const newProd = await pool.query(
+    // Insertamos usando ? como marcadores
+    const [result] = await pool.query(
       `INSERT INTO productos (
         nombre_producto, descripcion, precio_venta, precio_costo, stock, sku, categoria
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [nombre_producto, descripcion, precio_venta, precio_costo, stock, sku, categoria]
     );
-    res.status(201).json(newProd.rows[0]);
+
+    // En MySQL buscamos el ID recién creado para devolver el objeto completo
+    const [rows] = await pool.query('SELECT * FROM productos WHERE id = ?', [result.insertId]);
+    res.status(201).json(rows[0]);
+    
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -57,26 +56,29 @@ app.put('/api/productos/:id', async (req, res) => {
       stock, sku, categoria 
     } = req.body;
 
-    const updatedProd = await pool.query(
+    await pool.query(
       `UPDATE productos SET 
-        nombre_producto = $1, descripcion = $2, precio_venta = $3, 
-        precio_costo = $4, stock = $5, sku = $6, categoria = $7
-       WHERE id = $8 RETURNING *`,
+        nombre_producto = ?, descripcion = ?, precio_venta = ?, 
+        precio_costo = ?, stock = ?, sku = ?, categoria = ?
+       WHERE id = ?`,
       [nombre_producto, descripcion, precio_venta, precio_costo, stock, sku, categoria, id]
     );
-    res.json(updatedProd.rows[0]);
+
+    // Devolvemos el producto actualizado
+    const [rows] = await pool.query('SELECT * FROM productos WHERE id = ?', [id]);
+    res.json(rows[0]);
+
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// 4. DELETE (Desactivar un producto, no borrar)
-// Usamos un borrado lógico (cambiar 'activo' a 'false')
+// 4. DELETE (Borrado lógico)
 app.delete('/api/productos/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    await pool.query('UPDATE productos SET activo = false WHERE id = $1', [id]);
-    res.status(204).send(); // 204 = Éxito, sin contenido
+    await pool.query('UPDATE productos SET activo = false WHERE id = ?', [id]);
+    res.status(204).send();
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
